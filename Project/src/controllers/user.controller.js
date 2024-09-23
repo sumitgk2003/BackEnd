@@ -2,6 +2,7 @@ import asyncHandler from '../utils/asyncHandler.js'
 import ApiError from '../utils/ApiError.js'
 import ApiResponse from '../utils/ApiResponse.js';
 import { User } from '../models/user.model.js';
+import { Subscription } from '../models/subscription.model.js';
 import uploadOnCloudinary from '../utils/cloudinary.js'
 import jwt from 'jsonwebtoken';
 const generateAccessAndRefreshTokens=async(userId)=>{
@@ -183,4 +184,85 @@ const refreshAccessToken=asyncHandler(async(req,res)=>{
     throw new ApiError(401,error||'Invalid refresh Token')
   }
 })
-export {registerUser,loginUser,logoutUser,refreshAccessToken};
+
+const subscribe=asyncHandler(async(req,res)=>{
+  const {username}=req.body;
+  const channel =await User.findOne({username});
+  console.log(channel);
+  const subscription=await Subscription.create({
+    channel:channel._id,
+    subscriber:req.user._id
+  })
+  return res.status(200).json(
+    new ApiResponse(200,subscription,'user subscribed successfully')
+  )
+})
+
+const getUserChannelProfile=asyncHandler(async(req,res)=>{
+  const {username}=req.params;
+  console.log(username);
+  if(!username?.trim()){
+    throw new ApiError(400,'username is missing');
+    }
+  const channel= await User.aggregate([
+      {
+        $match:{
+          username:username.toLowerCase()
+        }
+      },
+      {
+        $lookup:{
+          from:'subscriptions',
+          localField:'_id',
+          foreignField:'channel',
+          as:'subscribers'
+        }
+      },
+      {
+        $lookup:{
+          from:'subscriptions',
+          localField:'_id',
+          foreignField:'subscriber',
+          as:'subscribedTo'
+        }
+      },
+      {
+        $addFields:{
+          subscribersCount:{
+            $size:'$subscribers'
+          },
+          channelsSubscribedToCount:{
+            $size:'$subscribedTo'
+          },
+          isSubscribed:{
+            $cond:{
+              if:{$in:[req.user._id,'$subscribers.subscriber']},
+              then:true,
+              else:false
+            }
+          }
+        }
+      },
+      {
+        $project:{
+          username:1,
+          fullname:1,
+          subscribersCount:1,
+          channelsSubscribedToCount:1,
+          isSubscribed:1,
+          avatar:1,
+          coverImage:1,
+          email:1
+        }
+      }
+  ])
+  console.log(channel);
+  if(!channel?.length){
+    throw new ApiError(404,'channel does not exists')
+  }
+
+  return res.status(200).json(
+    new ApiResponse(200,channel,'user channel fetched successfully')
+  )
+})
+export {registerUser,loginUser,logoutUser,refreshAccessToken,getUserChannelProfile,subscribe};
